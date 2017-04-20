@@ -40,8 +40,9 @@ class Automation {
     void Roll( float turn_amount );
     void Throttle( float amount );
     void Depth( float amount );
-    void Yaw( float amount );
+    void Yaw( uint16_t amount );
     void rc_override(int forward, int left, int throttle);
+    void turn();
     //---------------------------------------------------
   private:
 
@@ -62,21 +63,11 @@ class Automation {
 };
 
 Automation::Automation() {
-
-  // connects subs and pubs
-  joy_pub = nh.advertise<sensor_msgs::Joy>( "joy_f310" , 1);
-  if(!joy_pub) {
-    ROS_INFO("Failed to open publisher");
-  }
-
-  /* ros::Rate poll_rate(100); */
-  /* while(joy_pub.getNumSubscribers() == 0 && ros::ok()) { */
-  /*   poll_rate.sleep(); */
-  /* } */
-
   quat_sub = nh.subscribe("/mavros/imu/data", 100, &Automation::quatCallback, this);
+  rc_override_pub = nh.advertise<mavros_msgs::OverrideRCIn>("/mavros/rc/override", 1);
 
   mode = MODE_STABILIZE;
+  /* mode = MODE_ALT_HOLD; */
   camera_tilt = 1500;
 
   // f310 axes (from): [left X, left Y, LT, right X, right Y, RT, pad L/R, pad U/D]
@@ -159,33 +150,55 @@ void Automation::Depth( float amount )
 
 }
 
-void Automation::Yaw( float amount )
+void Automation::Yaw( uint16_t amount )
 {
 	ROS_INFO("Change Yaw");
-	sensor_msgs::Joy out;
-	out.axes = std::vector<float>(8 , 0);
-	out.buttons = std::vector<int32_t>(11 , 0);
+	mavros_msgs::OverrideRCIn msg;
 
-	// TODO : check if the right button
-	out.axes[0] = amount;
-	joy_pub.publish(out);
+	msg.channels[5] = -1; // forward  (x)
+    msg.channels[6] = -1; // strafe   (y)
+	msg.channels[2] = -1; // throttle (z)
 
+	msg.channels[1] = -1; // roll     (wx)
+	msg.channels[0] = -1; // pitch    (wy)
+	msg.channels[3] = 1500 + amount; // yaw      (wz)
+
+	msg.channels[4] = mode; // mode
+	msg.channels[7] = -1; // camera tilt
+
+    ROS_INFO("/mavros/rc/override: %d %d %d", msg.channels[5], msg.channels[6], msg.channels[2]);
+	rc_override_pub.publish(msg);
 
 }
 
+void Automation::turn() {
+	mavros_msgs::OverrideRCIn msg;
+
+	msg.channels[5] = 1500 + 100; // forward  (x)
+    msg.channels[6] = 1500; // strafe   (y)
+	msg.channels[2] = 1500+100; // throttle (z)
+
+	msg.channels[1] = 1500; // roll     (wx)
+	msg.channels[0] = 1500; // pitch    (wy)
+	msg.channels[3] = 1500 + 400; // yaw      (wz)
+
+	msg.channels[4] = mode; // mode
+	msg.channels[7] = camera_tilt; // camera tilt
+
+	rc_override_pub.publish(msg);
+}
 void Automation::rc_override(int forward, int left, int throttle)
 {
     ROS_INFO("Sending rc_override values");
-	rc_override_pub = nh.advertise<mavros_msgs::OverrideRCIn>("/mavros/rc/override", 1);
 	mavros_msgs::OverrideRCIn msg;
 
 	msg.channels[5] = 1500 + forward; // forward  (x)
-    msg.channels[6] = 1500 + left; // strafe   (y)
+    msg.channels[6] = 1500; // strafe   (y)
 	msg.channels[2] = 1500 + throttle; // throttle (z)
 
 	msg.channels[1] = 1500; // roll     (wx)
 	msg.channels[0] = 1500; // pitch    (wy)
-	msg.channels[3] = 1500; // yaw      (wz)
+	msg.channels[3] = 1500 + left; // yaw      (wz)
 
 	msg.channels[4] = mode; // mode
 	msg.channels[7] = camera_tilt; // camera tilt
@@ -249,37 +262,40 @@ int main(int argc, char** argv) {
 
   ros::Rate r(5);
   while(!g_request_shutdown) {
-      char c;
-      if(read(STDIN_FILENO, &c, 1) == 1) {
-          ROS_INFO("Got %c", c);
-          switch(c) {
-              case 'w':
-                  automation.rc_override(200, 0, 0);
-                  break;
-              case 'a':
-                  automation.rc_override(0, 200, 0);
-                  break;
-              case 's':
-                  automation.rc_override(-200, 0, 0);
-                  break;
-              case 'd':
-                  automation.rc_override(0, -200, 0);
-                  break;
-              case 'k':
-                  automation.rc_override(0, 0, 200);
-                  break;
-              case 'j':
-                  automation.rc_override(0, 0, -200);
-                  break;
-              case 'q':
-                  g_request_shutdown = 1;
-                  break;
-          }
-          while (getchar() != EOF);
-      } else {
-          automation.rc_override(-1500, -1500, -1500);
-          ROS_INFO("No character received");
-      }
+      automation.turn();
+      /* char c; */
+      /* if(read(STDIN_FILENO, &c, 1) == 1) { */
+      /*     ROS_INFO("Got %c", c); */
+      /*     switch(c) { */
+      /*         case 'w': */
+      /*             automation.rc_override(200, 0, 0); */
+      /*             break; */
+      /*         case 'a': */
+      /*             automation.rc_override(0, 200, 0); */
+      /*             /1* automation.Yaw(-200); *1/ */
+      /*             break; */
+      /*         case 's': */
+      /*             automation.rc_override(-200, 0, 0); */
+      /*             break; */
+      /*         case 'd': */
+      /*             /1* automation.Yaw(-200); *1/ */
+      /*             automation.rc_override(0, -200, 0); */
+      /*             break; */
+      /*         case 'k': */
+      /*             automation.rc_override(0, 0, 200); */
+      /*             break; */
+      /*         case 'j': */
+      /*             automation.rc_override(0, 0, -200); */
+      /*             break; */
+      /*         case 'q': */
+      /*             g_request_shutdown = 1; */
+      /*             break; */
+      /*     } */
+      /*     while (getchar() != EOF); */
+      /* } else { */
+      /*     automation.rc_override(0, 0, 0); */
+      /*     ROS_INFO("No character received"); */
+      /* } */
 
       /* automation.rc_override(); */
 
