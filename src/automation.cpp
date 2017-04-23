@@ -4,305 +4,177 @@
  * Date: February 2017
  * Description: Automation the control of the bluerov.
  */
+#include "automation.h"
 
-#include <signal.h>
-#include <ros/ros.h>
-#include <ros/console.h>
-#include <mavros_msgs/StreamRate.h>
-#include <sensor_msgs/Joy.h>
-#include <sensor_msgs/Imu.h>
-#include <geometry_msgs/Quaternion.h>
-#include <unistd.h>
-#include <tf/transform_datatypes.h>
-#include <mavros_msgs/OverrideRCIn.h>
-#include <mavros_msgs/CommandBool.h>
-#include <mavros_msgs/CommandLong.h>
-#include <mavros_msgs/CommandCode.h>
-#include <functional>
-#include <mavros_msgs/Mavlink.h>
-#include <stdio.h>
-
-#include <stdlib.h>
+#include <errno.h>
 #include <fcntl.h>
-#include <termios.h>
+#include <mavros_msgs/CommandBool.h>
+#include <mavros_msgs/OverrideRCIn.h>
+#include <mavros_msgs/StreamRate.h>
+#include <nav_msgs/Odometry.h>
+#include <ros/console.h>
+#include <ros/ros.h>
+#include <sensor_msgs/FluidPressure.h>
+#include <sensor_msgs/Imu.h>
+#include <stdio.h>
+#include <tf/transform_datatypes.h>
 #include <unistd.h>
+#include <functional>
 
-class Automation {
-  public:
-    Automation();
-    static void ArmPixhawk();
-    static void DisarmPixhawk();
-    static void SetIMURate(int hz);
+using mavros_msgs::OverrideRCIn;
+using mavros_msgs::StreamRate;
+using sensor_msgs::Imu;
+using sensor_msgs::FluidPressure;
+using nav_msgs::Odometry;
 
-    void shutdown(int signum);
+Automation::Automation(std::string gains) {
+  odom_sub_ =
+      nh.subscribe("/odometry/filtered", 1, &Automation::odomCallback, this);
+  depth_sub_ = nh.subscribe("/mavros/imu/atm_pressure", 1,
+                            &Automation::depthCallback, this);
+  rc_override_pub_ = nh.advertise<OverrideRCIn>("/mavros/rc/override", 1);
 
-    //----------------------------------------------
-    void Roll( float turn_amount );
-    void Throttle( float amount );
-    void Depth( float amount );
-    void Yaw( uint16_t amount );
-    void rc_override(int forward, int left, int throttle);
-    void turn();
-    //---------------------------------------------------
-  private:
+  angular_setpoint_sub_ = nh.subscribe("/vehicle/angular/goal", 1,
+                               &Automation::angularSetpointCallback, this);
+  linear_setpoint_sub_ = nh.subscribe("/vehicle/linearVelocity/goal", 1,
+                               &Automation::linearSetpointCallback, this);
 
-    enum {MODE_STABILIZE=1000, MODE_ALT_HOLD=2000}; // ppm in uS; from ArduSub/radio.cpp
-    // functions
-    void quatCallback(const sensor_msgs::Imu::ConstPtr &msg);
+  arming_sub_ = nh.subscribe("/vehicle/arming", 1, &Automation::armingCallback, this);
 
-    uint16_t mode;
-    uint16_t camera_tilt;
+  mode_ = MODE_STABILIZE;
+  camera_tilt_ = 1500;
 
-    // node handle
-    ros::NodeHandle nh;
-
-    // pubs
-    ros::Publisher rc_override_pub;
-    ros::Publisher joy_pub;
-    ros::Subscriber quat_sub;
-};
-
-Automation::Automation() {
-  quat_sub = nh.subscribe("/mavros/imu/data", 100, &Automation::quatCallback, this);
-  rc_override_pub = nh.advertise<mavros_msgs::OverrideRCIn>("/mavros/rc/override", 1);
-
-  mode = MODE_STABILIZE;
-  /* mode = MODE_ALT_HOLD; */
-  camera_tilt = 1500;
-
-  // f310 axes (from): [left X, left Y, LT, right X, right Y, RT, pad L/R, pad U/D]
-  // f310 buttons (from): [A, B, X, Y LB, RB, BACK, START, POWER, left stick, right stick click]
+  gainsFromFile(gains);
 }
 
+void Automation::gainsFromFile(std::string file) {
+  FILE *fd = fopen(file.c_str(), "r");
+  if (fd == NULL) {
+    perror("Failed to open gains file");
+    exit(-1);
+  }
 
+  float kp, kd, ki, min, max;
+
+  fscanf(fd, "Pitch\nKp: %f\nKd: %f\nKi: %f\nMin: %f\nMax: %f\n", &kp, &kd, &ki,
+         &min, &max);
+  printf("Pitch: %f %f %f %f %f\n", kp, kd, ki, min, max);
+  pitch_pid_.setGains(kp, kd, ki, min, max);
+  fscanf(fd, "Roll\nKp: %f\nKd: %f\nKi: %f\nMin: %f\nMax: %f\n", &kp, &kd, &ki,
+         &min, &max);
+  printf("Roll: %f %f %f %f %f\n", kp, kd, ki, min, max);
+  roll_pid_.setGains(kp, kd, ki, min, max);
+  fscanf(fd, "Roll\nKp: %f\nKd: %f\nKi: %f\nMin: %f\nMax: %f\n", &kp, &kd, &ki,
+         &min, &max);
+  printf("Yaw: %f %f %f %f %f\n", kp, kd, ki, min, max);
+  yaw_pid_.setGains(kp, kd, ki, min, max);
+
+  fscanf(fd, "Depth\nKp: %f\nKd: %f\nKi: %f\nMin: %f\nMax: %f\n", &kp, &kd, &ki,
+         &min, &max);
+  printf("Depth: %f %f %f %f %f\n", kp, kd, ki, min, max);
+  depth_pid_.setGains(kp, kd, ki, min, max);
+}
 
 void Automation::ArmPixhawk() {
   ROS_INFO("Arming PixHawk");
   ros::NodeHandle n;
-  ros::ServiceClient client = n.serviceClient<mavros_msgs::CommandBool>("/mavros/cmd/arming");
+  ros::ServiceClient client =
+      n.serviceClient<mavros_msgs::CommandBool>("/mavros/cmd/arming");
   mavros_msgs::CommandBool srv;
   srv.request.value = true;
-  if(!client.call(srv)) {
-      ROS_ERROR("Failed to arm");
+  if (!client.call(srv)) {
+    ROS_ERROR("Failed to arm");
   }
 }
 void Automation::DisarmPixhawk() {
   ROS_INFO("Disarming PixHawk");
   ros::NodeHandle n;
-  ros::ServiceClient client = n.serviceClient<mavros_msgs::CommandBool>("/mavros/cmd/arming");
+  ros::ServiceClient client =
+      n.serviceClient<mavros_msgs::CommandBool>("/mavros/cmd/arming");
   mavros_msgs::CommandBool srv;
   srv.request.value = false;
-  if(!client.call(srv)) {
-      ROS_ERROR("Failed to disarm");
+  if (!client.call(srv)) {
+    ROS_ERROR("Failed to disarm");
   }
 }
 
 void Automation::SetIMURate(int hz) {
   ROS_INFO("Setting the IMU Rate to %d Hz", hz);
   ros::NodeHandle n;
-  ros::ServiceClient client = n.serviceClient<mavros_msgs::StreamRate>("/mavros/set_stream_rate");
-  mavros_msgs::StreamRate srv;
-  srv.request.stream_id = 0; // mavros_msgs::StreamRate::STREAM_ALL;
+  ros::ServiceClient client =
+      n.serviceClient<StreamRate>("/mavros/set_stream_rate");
+  StreamRate srv;
+  srv.request.stream_id = 0;  // StreamRate::STREAM_ALL;
   srv.request.message_rate = hz;
   srv.request.on_off = 0;
-  if(!client.call(srv)) {
+  if (!client.call(srv)) {
     ROS_ERROR("Failed to call set_stream_rate service");
   }
 }
 
-void Automation::Roll( float turn_amount )
-{
-  ROS_INFO("Change Roll");
-  sensor_msgs::Joy out;
-  out.axes = std::vector<float>(8, 0);
-  out.buttons = std::vector<int32_t>(11, 0);
-
-  // TODO : check if the right button
-  out.axes[3] = turn_amount;
-
-  joy_pub.publish(out);
+void Automation::SetRPY(double roll, double pitch, double yaw) {
+  roll_pid_.set(roll);
+  pitch_pid_.set(pitch);
+  yaw_pid_.set(yaw);
 }
 
-void Automation::Throttle( float amount  )
-{
-	ROS_INFO("Throttle");
-	sensor_msgs::Joy out;
-	out.axes = std::vector<float>(8, 0);
-	out.buttons = std::vector<int32_t>(11, 0);
-
-	// TODO : check if the right button
-	out.axes[1] = amount;
-
-	joy_pub.publish(out);
+void Automation::depthCallback(
+    const sensor_msgs::FluidPressure::ConstPtr &msg) {
+  pressure_ = msg->fluid_pressure;
 }
 
-// positive value ascend and negetive desend
-void Automation::Depth( float amount )
-{
-	ROS_INFO( " Change Depth ");
-	sensor_msgs::Joy out;
-	out.axes = std::vector<float>(8,0);
-	out.buttons = std::vector<int32_t>(11,0);
-
-	// TODO : check if the right button
-	out.axes[4] = amount;
-	joy_pub.publish(out);
-
-}
-
-void Automation::Yaw( uint16_t amount )
-{
-	ROS_INFO("Change Yaw");
-	mavros_msgs::OverrideRCIn msg;
-
-	msg.channels[5] = -1; // forward  (x)
-    msg.channels[6] = -1; // strafe   (y)
-	msg.channels[2] = -1; // throttle (z)
-
-	msg.channels[1] = -1; // roll     (wx)
-	msg.channels[0] = -1; // pitch    (wy)
-	msg.channels[3] = 1500 + amount; // yaw      (wz)
-
-	msg.channels[4] = mode; // mode
-	msg.channels[7] = -1; // camera tilt
-
-    ROS_INFO("/mavros/rc/override: %d %d %d", msg.channels[5], msg.channels[6], msg.channels[2]);
-	rc_override_pub.publish(msg);
-
-}
-
-void Automation::turn() {
-	mavros_msgs::OverrideRCIn msg;
-
-	msg.channels[5] = 1500 + 100; // forward  (x)
-    msg.channels[6] = 1500; // strafe   (y)
-	msg.channels[2] = 1500+100; // throttle (z)
-
-	msg.channels[1] = 1500; // roll     (wx)
-	msg.channels[0] = 1500; // pitch    (wy)
-	msg.channels[3] = 1500 + 400; // yaw      (wz)
-
-	msg.channels[4] = mode; // mode
-	msg.channels[7] = camera_tilt; // camera tilt
-
-	rc_override_pub.publish(msg);
-}
-void Automation::rc_override(int forward, int left, int throttle)
-{
-    ROS_INFO("Sending rc_override values");
-	mavros_msgs::OverrideRCIn msg;
-
-	msg.channels[5] = 1500 + forward; // forward  (x)
-    msg.channels[6] = 1500; // strafe   (y)
-	msg.channels[2] = 1500 + throttle; // throttle (z)
-
-	msg.channels[1] = 1500; // roll     (wx)
-	msg.channels[0] = 1500; // pitch    (wy)
-	msg.channels[3] = 1500 + left; // yaw      (wz)
-
-	msg.channels[4] = mode; // mode
-	msg.channels[7] = camera_tilt; // camera tilt
-
-    ROS_INFO("/mavros/rc/override: %d %d %d", msg.channels[5], msg.channels[6], msg.channels[2]);
-	rc_override_pub.publish(msg);
-}
-
-
-void Automation::quatCallback(const sensor_msgs::Imu::ConstPtr &msg) {
-  ROS_INFO("Quat: %f %f %f %f", msg->orientation.x, msg->orientation.y,
-	   msg->orientation.z, msg->orientation.w);
-  tf::Quaternion q(msg->orientation.x, msg->orientation.y, msg->orientation.z,
-		   msg->orientation.w);
+void Automation::odomCallback(const Odometry::ConstPtr &msg) {
+  tf::Quaternion q(msg->pose.pose.orientation.x, msg->pose.pose.orientation.y,
+                   msg->pose.pose.orientation.z, msg->pose.pose.orientation.w);
   tf::Matrix3x3 m(q);
-  double roll, pitch, yaw;
-  m.getRPY(roll, pitch, yaw);
+  m.getRPY(roll_, pitch_, yaw_);
 
-  ROS_INFO("RPY: %f, %f, %f", roll, pitch, yaw);
+  roll_dot_ = msg->twist.twist.angular.x;
+  pitch_dot_ = msg->twist.twist.angular.y;
+  yaw_dot_ = msg->twist.twist.angular.z;
 }
 
-struct termios orig_termios;
-
-void disableRawMode() {
-  tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_termios);
-}
-
-void enableRawMode() {
-  tcgetattr(STDIN_FILENO, &orig_termios);
-  atexit(disableRawMode);
-
-  struct termios raw = orig_termios;
-  raw.c_lflag &= ~(ECHO | ICANON);
-
-  tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
-}
-
-// Signal-safe flag for whether shutdown is requested
-sig_atomic_t volatile g_request_shutdown = 0;
-
-// Replacement SIGINT handler
-void mySigIntHandler(int sig)
-{
-  g_request_shutdown = 1;
-}
-
-int main(int argc, char** argv) {
-  ros::init(argc, argv, "automation");
-
-  ros::NodeHandle nh;
-  Automation automation;
-  Automation::ArmPixhawk();
-  signal(SIGINT, mySigIntHandler);
-
-
-  enableRawMode();
-  // Make stdin nonblocking
-  int flags = fcntl(STDIN_FILENO, F_GETFL, 0);
-  fcntl(STDIN_FILENO, F_SETFL, flags | O_NONBLOCK);
-
-
-  ros::Rate r(5);
-  while(!g_request_shutdown) {
-      automation.turn();
-      /* char c; */
-      /* if(read(STDIN_FILENO, &c, 1) == 1) { */
-      /*     ROS_INFO("Got %c", c); */
-      /*     switch(c) { */
-      /*         case 'w': */
-      /*             automation.rc_override(200, 0, 0); */
-      /*             break; */
-      /*         case 'a': */
-      /*             automation.rc_override(0, 200, 0); */
-      /*             /1* automation.Yaw(-200); *1/ */
-      /*             break; */
-      /*         case 's': */
-      /*             automation.rc_override(-200, 0, 0); */
-      /*             break; */
-      /*         case 'd': */
-      /*             /1* automation.Yaw(-200); *1/ */
-      /*             automation.rc_override(0, -200, 0); */
-      /*             break; */
-      /*         case 'k': */
-      /*             automation.rc_override(0, 0, 200); */
-      /*             break; */
-      /*         case 'j': */
-      /*             automation.rc_override(0, 0, -200); */
-      /*             break; */
-      /*         case 'q': */
-      /*             g_request_shutdown = 1; */
-      /*             break; */
-      /*     } */
-      /*     while (getchar() != EOF); */
-      /* } else { */
-      /*     automation.rc_override(0, 0, 0); */
-      /*     ROS_INFO("No character received"); */
-      /* } */
-
-      /* automation.rc_override(); */
-
-      ros::spinOnce();
-      r.sleep();
+void Automation::armingCallback(const std_msgs::Bool::ConstPtr &msg) {
+  if(msg->data) {
+    ArmPixhawk();
+  } else {
+    DisarmPixhawk();
   }
-  Automation::DisarmPixhawk();
-  ros::shutdown();
-  return 0;
+}
+
+void Automation::angularSetpointCallback(const geometry_msgs::Vector3::ConstPtr &msg) {
+  ROS_INFO("Received angular setpoint: %f %f %f", msg->x, msg->y, msg->z);
+  roll_ = msg->x;
+  pitch_ = msg->y;
+  yaw_ = msg->z;
+}
+
+void Automation::linearSetpointCallback(const geometry_msgs::Vector3::ConstPtr &msg) {
+  ROS_INFO("Received linear setpoint: %f %f %f", msg->x, msg->y, msg->z);
+  xdot_ = msg->x;
+  ydot_ = msg->y;
+  zdot_ = msg->z;
+}
+
+void Automation::spin(float hz) {
+  ros::Rate rate(hz);
+  ROS_INFO("Entering loop");
+
+  while (ros::ok()) {
+    // Apply the PID controllers
+    ros::spinOnce();
+    OverrideRCIn msg;
+    msg.channels[1] = 1500 + roll_pid_.get_pidd(roll_, roll_dot_);
+    msg.channels[0] = 1500 + pitch_pid_.get_pidd(pitch_, pitch_dot_);
+    msg.channels[3] = 1500 + yaw_pid_.get_pidd(yaw_, yaw_dot_);
+
+    msg.channels[5] = 1500 + xdot_;
+    msg.channels[6] = 1500 + ydot_;
+    msg.channels[2] = 1500 + zdot_ + depth_pid_.get_pid(pressure_);
+
+    msg.channels[4] = mode_;
+    msg.channels[7] = camera_tilt_;
+    rc_override_pub_.publish(msg);
+    rate.sleep();
+  }
 }

@@ -1,0 +1,24 @@
+Pitch
+Kp: 5.0
+Kd: 0.0
+Ki: 0.0
+Min: -20.0
+Max: 20.0
+Roll
+Kp: 5.0
+Kd: 0.0
+Ki: 0.0
+Min: -20.0
+Max: 20.0
+Yaw
+Kp: 5.0
+Kd: 0.0
+Ki: 0.0
+Min: -20.0
+Max: 20.0
+Depth
+Kp: 5.0
+Kd: 0.0
+Ki: 0.0
+Min: -20.0
+Max: 20.0
