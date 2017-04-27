@@ -28,8 +28,10 @@ using sensor_msgs::FluidPressure;
 using nav_msgs::Odometry;
 
 Automation::Automation(std::string gains) {
-  odom_sub_ =
-      nh.subscribe("/odometry/filtered", 1, &Automation::odomCallback, this);
+  /* odom_sub_ = */
+  /*     nh.subscribe("/odometry/filtered", 1, &Automation::odomCallback, this); */
+  imu_sub_ =
+      nh.subscribe("/mavros/imu/data", 1, &Automation::imuCallback, this);
   depth_sub_ = nh.subscribe("/mavros/imu/atm_pressure", 1,
                             &Automation::depthCallback, this);
   rc_override_pub_ = nh.advertise<OverrideRCIn>("/mavros/rc/override", 1);
@@ -56,21 +58,35 @@ void Automation::gainsFromFile(std::string file) {
 
   float kp, kd, ki, min, max;
 
-  fscanf(fd, "Pitch\nKp: %f\nKd: %f\nKi: %f\nMin: %f\nMax: %f\n", &kp, &kd, &ki,
-         &min, &max);
+  if(fscanf(fd, "Pitch\nKp: %f\nKd: %f\nKi: %f\nMin: %f\nMax: %f\n", &kp, &kd, &ki,
+        &min, &max) < 5) {
+    printf("Error reading pitch");
+    exit(-1);
+  }
   printf("Pitch: %f %f %f %f %f\n", kp, kd, ki, min, max);
   pitch_pid_.setGains(kp, kd, ki, min, max);
-  fscanf(fd, "Roll\nKp: %f\nKd: %f\nKi: %f\nMin: %f\nMax: %f\n", &kp, &kd, &ki,
-         &min, &max);
+
+  if(fscanf(fd, "Roll\nKp: %f\nKd: %f\nKi: %f\nMin: %f\nMax: %f\n", &kp, &kd, &ki,
+        &min, &max) < 5) {
+    printf("Error reading roll");
+    exit(-1);
+  }
   printf("Roll: %f %f %f %f %f\n", kp, kd, ki, min, max);
   roll_pid_.setGains(kp, kd, ki, min, max);
-  fscanf(fd, "Roll\nKp: %f\nKd: %f\nKi: %f\nMin: %f\nMax: %f\n", &kp, &kd, &ki,
-         &min, &max);
+
+  if(fscanf(fd, "Yaw\nKp: %f\nKd: %f\nKi: %f\nMin: %f\nMax: %f\n", &kp, &kd, &ki,
+        &min, &max) < 5) {
+    printf("Error reading yaw");
+    exit(-1);
+  }
   printf("Yaw: %f %f %f %f %f\n", kp, kd, ki, min, max);
   yaw_pid_.setGains(kp, kd, ki, min, max);
 
-  fscanf(fd, "Depth\nKp: %f\nKd: %f\nKi: %f\nMin: %f\nMax: %f\n", &kp, &kd, &ki,
-         &min, &max);
+  if(fscanf(fd, "Depth\nKp: %f\nKd: %f\nKi: %f\nMin: %f\nMax: %f\n", &kp, &kd, &ki,
+        &min, &max) < 5) {
+    printf("Error reading depth");
+    exit(-1);
+  }
   printf("Depth: %f %f %f %f %f\n", kp, kd, ki, min, max);
   depth_pid_.setGains(kp, kd, ki, min, max);
 }
@@ -118,9 +134,19 @@ void Automation::SetRPY(double roll, double pitch, double yaw) {
   yaw_pid_.set(yaw);
 }
 
+
+void Automation::SetDepth(double depth) {
+  depth_pid_.set(depth);
+}
+
+double Automation::GetDepth() {
+  return pressure_;
+}
+
 void Automation::depthCallback(
     const sensor_msgs::FluidPressure::ConstPtr &msg) {
   pressure_ = msg->fluid_pressure;
+  /* ROS_INFO("Pressure: %f", pressure_); */
 }
 
 void Automation::odomCallback(const Odometry::ConstPtr &msg) {
@@ -129,9 +155,22 @@ void Automation::odomCallback(const Odometry::ConstPtr &msg) {
   tf::Matrix3x3 m(q);
   m.getRPY(roll_, pitch_, yaw_);
 
+  ROS_INFO("Got rpy: %f %f %f", roll_, pitch_, yaw_);
   roll_dot_ = msg->twist.twist.angular.x;
   pitch_dot_ = msg->twist.twist.angular.y;
   yaw_dot_ = msg->twist.twist.angular.z;
+}
+
+void Automation::imuCallback(const sensor_msgs::Imu::ConstPtr &msg) {
+  tf::Quaternion q(msg->orientation.x, msg->orientation.y,
+                   msg->orientation.z, msg->orientation.w);
+  tf::Matrix3x3 m(q);
+  m.getRPY(roll_, pitch_, yaw_);
+
+  ROS_INFO("Got rpy: %f %f %f", roll_, pitch_, yaw_);
+  roll_dot_ = msg->angular_velocity.x;
+  pitch_dot_ = msg->angular_velocity.y;
+  yaw_dot_ = msg->angular_velocity.z;
 }
 
 void Automation::armingCallback(const std_msgs::Bool::ConstPtr &msg) {
@@ -158,23 +197,42 @@ void Automation::linearSetpointCallback(const geometry_msgs::Vector3::ConstPtr &
 
 void Automation::spin(float hz) {
   ros::Rate rate(hz);
-  ROS_INFO("Entering loop");
 
   while (ros::ok()) {
     // Apply the PID controllers
     ros::spinOnce();
     OverrideRCIn msg;
-    msg.channels[1] = 1500 + roll_pid_.get_pidd(roll_, roll_dot_);
-    msg.channels[0] = 1500 + pitch_pid_.get_pidd(pitch_, pitch_dot_);
-    msg.channels[3] = 1500 + yaw_pid_.get_pidd(yaw_, yaw_dot_);
+    msg.channels[1] = 1500; //+ roll_pid_.get_pidd(roll_, roll_dot_);
+    msg.channels[0] = 1500; //+ pitch_pid_.get_pidd(pitch_, pitch_dot_);
+    msg.channels[3] = 1500; // + yaw_pid_.get_pidd(yaw_, yaw_dot_);
 
-    msg.channels[5] = 1500 + xdot_;
-    msg.channels[6] = 1500 + ydot_;
-    msg.channels[2] = 1500 + zdot_ + depth_pid_.get_pid(pressure_);
+    msg.channels[5] = 1500; // + xdot_;
+    msg.channels[6] = 1500; // + ydot_;
+    msg.channels[2] = 1500 + zdot_ - depth_pid_.get_pid(pressure_);
 
     msg.channels[4] = mode_;
     msg.channels[7] = camera_tilt_;
     rc_override_pub_.publish(msg);
     rate.sleep();
   }
+}
+
+void Automation::spinOnce() {
+  // Apply the PID controllers
+  ros::spinOnce();
+  OverrideRCIn msg;
+
+  double yaw = -yaw_pid_.get_pid(yaw_);
+  msg.channels[1] = 1500; // + roll_pid_.get_pidd(roll_, roll_dot_);
+  msg.channels[0] = 1500; // + pitch_pid_.get_pidd(pitch_, pitch_dot_);
+  msg.channels[3] = 1500 + yaw;
+
+  msg.channels[5] = 1500; // + xdot_;
+  msg.channels[6] = 1500; // + ydot_;
+  msg.channels[2] = 1500 /*+ zdot_*/ - depth_pid_.get_pid(pressure_);
+
+  msg.channels[4] = mode_;
+  msg.channels[7] = camera_tilt_;
+  rc_override_pub_.publish(msg);
+  ROS_INFO("Yaw: %f", yaw);
 }

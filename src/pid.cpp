@@ -1,6 +1,7 @@
 #include "pid.h"
 #include "assert.h" 
 #include <unistd.h>
+#include <stdio.h>
 
 PID::PID() {
   initialized_ = false;
@@ -61,11 +62,10 @@ double PID::get_pidd(double actual, double velocity) {
 
 void PID::reset_I() { integral_ = 0.0; }
 
-double PID::get_pidd_(double actual, double velocity, double dt) {
+double PID::get_pidd_(double error, double velocity, double dt) {
   assert(!checkInitialized());
-  double error = set_ - actual;
   integral_ += dt * error;
-  double effort = kp_ * (set_ - actual) + kp_ * (-velocity) + ki_ * integral_;
+  double effort = kp_ * error + kd_ * (-velocity) + ki_ * integral_;
   if(effort < min_) {
     effort = min_;
   } else if(effort > max_) {

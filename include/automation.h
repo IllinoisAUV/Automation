@@ -5,6 +5,7 @@
 #include <nav_msgs/Odometry.h>
 #include <geometry_msgs/Vector3.h>
 #include <sensor_msgs/FluidPressure.h>
+#include <sensor_msgs/Imu.h>
 #include <std_msgs/Bool.h>
 #include <string>
 #include "pid.h"
@@ -20,6 +21,10 @@ class Automation {
   void SetRPY(double roll, double pitch, double yaw);
 
   void spin(float hz);
+  void spinOnce();
+
+  void SetDepth(double depth);
+  double GetDepth();
   //---------------------------------------------------
  private:
   enum {
@@ -30,6 +35,7 @@ class Automation {
   // functions
   void gainsFromFile(std::string file);
   void odomCallback(const nav_msgs::Odometry::ConstPtr &msg);
+  void imuCallback(const sensor_msgs::Imu::ConstPtr &msg);
   void depthCallback(const sensor_msgs::FluidPressure::ConstPtr &msg);
 
   void angularSetpointCallback(const geometry_msgs::Vector3::ConstPtr &msg);
@@ -45,6 +51,7 @@ class Automation {
   // pubs
   ros::Publisher rc_override_pub_;
   ros::Subscriber odom_sub_;
+  ros::Subscriber imu_sub_;
   ros::Subscriber depth_sub_;
 
   ros::Subscriber linear_setpoint_sub_;
