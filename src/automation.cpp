@@ -42,8 +42,7 @@ Automation::Automation(std::string gains) {
 
   angular_setpoint_sub_ = nh.subscribe(
       "/vehicle/angular/goal", 1, &Automation::angularSetpointCallback, this);
-  linear_setpoint_sub_ =
-      nh.subscribe("/vehicle/linearVelocity/goal", 1,
+  linear_setpoint_sub_ = nh.subscribe("/vehicle/linearVelocity/goal", 1,
                    &Automation::linearSetpointCallback, this);
 
   arming_sub_ =
@@ -51,10 +50,13 @@ Automation::Automation(std::string gains) {
 
   mode_client_ = nh.serviceClient<mavros_msgs::SetMode>("mavros/set_mode");
 
-  mode_ = MODE_STABILIZE;
+  mode_ = MODE_DEPTH_HOLD;
   camera_tilt_ = 1500;
 
   gainsFromFile(gains);
+
+
+  setMode(mode_);
 }
 
 void Automation::setMode(Mode mode) { 
@@ -69,7 +71,7 @@ void Automation::setMode(Mode mode) {
       mode_cmd.request.custom_mode = "MANUAL";
       break;
     case MODE_DEPTH_HOLD:
-      mode_cmd.request.custom_mode = "DEPTH_HOLD";
+      mode_cmd.request.custom_mode = "ALT_HOLD";
       break;
   }
 
@@ -185,7 +187,7 @@ void Automation::odomCallback(const Odometry::ConstPtr &msg) {
   tf::Matrix3x3 m(q);
   m.getRPY(roll_, pitch_, yaw_);
 
-  ROS_INFO("Got rpy: %f %f %f", roll_, pitch_, yaw_);
+  /* ROS_INFO("Got rpy: %f %f %f", roll_, pitch_, yaw_); */
   roll_dot_ = msg->twist.twist.angular.x;
   pitch_dot_ = msg->twist.twist.angular.y;
   yaw_dot_ = msg->twist.twist.angular.z;
@@ -197,7 +199,7 @@ void Automation::imuCallback(const sensor_msgs::Imu::ConstPtr &msg) {
   tf::Matrix3x3 m(q);
   m.getRPY(roll_, pitch_, yaw_);
 
-  ROS_INFO("Got rpy: %f %f %f", roll_, pitch_, yaw_);
+  /* ROS_INFO("Got rpy: %f %f %f", roll_, pitch_, yaw_); */
   roll_dot_ = msg->angular_velocity.x;
   pitch_dot_ = msg->angular_velocity.y;
   yaw_dot_ = msg->angular_velocity.z;
@@ -214,8 +216,8 @@ void Automation::armingCallback(const std_msgs::Bool::ConstPtr &msg) {
 void Automation::angularSetpointCallback(
     const geometry_msgs::Vector3::ConstPtr &msg) {
   ROS_INFO("Received angular setpoint: %f %f %f", msg->x, msg->y, msg->z);
-  roll_ = msg->x;
-  pitch_ = msg->y;
+  roll_set_ = msg->x;
+  pitch_set_ = msg->y;
   yaw_ = msg->z;
 }
 
@@ -249,18 +251,22 @@ void Automation::spin(float hz) {
   }
 }
 
+void Automation::setSpeed(double x, double y, double z) {
+  xdot_ = x;
+  ydot_ = y;
+  zdot_ = z;
+}
+
 uint16_t Automation::angleToPpm(double angle) {
   // Map [-pi, pi] -> [1000, 2000]
-
-
-  uint16_t ppm = (angle - (-M_PI))/(M_PI - (-M_PI)) * (2000 - 1000) + 1000;
+  uint16_t ppm = (angle - (-M_PI))/(M_PI - (-M_PI)) * (1000) + 1000;
 
   return ppm;
 }
 
 
 uint16_t Automation::speedToPpm(double speed) {
-  if(speed > 1.0 || speed < 0.0) {
+  if(speed > 1.0 || speed < -1.0) {
     ROS_ERROR("Invalid speed requested: %f", speed);
     return 1500;
   }
@@ -272,17 +278,17 @@ void Automation::spinOnce() {
   ros::spinOnce();
   OverrideRCIn msg;
 
-  double yaw = -yaw_pid_.get_pid(yaw_);
-  msg.channels[1] = 1500 + angleToPpm(roll_set_);  // + roll_pid_.get_pidd(roll_, roll_dot_);
-  msg.channels[0] = 1500 + angleToPpm(pitch_set_);  // + pitch_pid_.get_pidd(pitch_, pitch_dot_);
+  double yaw = 0;// -yaw_pid_.get_pid(yaw_);
+  msg.channels[1] = angleToPpm(roll_set_);  // + roll_pid_.get_pidd(roll_, roll_dot_);
+  msg.channels[0] = angleToPpm(pitch_set_);  // + pitch_pid_.get_pidd(pitch_, pitch_dot_);
   msg.channels[3] = 1500 + yaw;
 
-  msg.channels[5] = 1500 + speedToPpm(xdot_);
-  msg.channels[6] = 1500 + speedToPpm(ydot_);  // + ydot_;
-  msg.channels[2] = 1500 + speedToPpm(zdot_); // /*+ zdot_*/ - depth_pid_.get_pid(pressure_);
+  msg.channels[5] = speedToPpm(xdot_);
+  msg.channels[6] = speedToPpm(ydot_);  // + ydot_;
+  msg.channels[2] = speedToPpm(zdot_); // /*+ zdot_*/ - depth_pid_.get_pid(pressure_);
 
   msg.channels[4] = mode_;
   msg.channels[7] = camera_tilt_;
   rc_override_pub_.publish(msg);
-  ROS_INFO("Yaw: %f", yaw);
+  /* ROS_INFO("Yaw: %f", yaw); */
 }

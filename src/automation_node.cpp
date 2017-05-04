@@ -32,7 +32,8 @@ int main(int argc, char **argv) {
     rate.sleep();
   }
   automation.setDepth(automation.getDepth() - 50.0);
-  automation.setRPY(0.0, 0.0, 1.5);
+  automation.setRPY(0.0, 0.0, 0.0);
+  automation.setSpeed(0.0, 0.0, 0.0);
   while (!g_request_shutdown) {
     automation.spinOnce();
     rate.sleep();
