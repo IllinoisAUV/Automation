@@ -218,7 +218,7 @@ void Automation::angularSetpointCallback(
   ROS_INFO("Received angular setpoint: %f %f %f", msg->x, msg->y, msg->z);
   roll_set_ = msg->x;
   pitch_set_ = msg->y;
-  yaw_ = msg->z;
+  yaw_dot_ = msg->z;
 }
 
 void Automation::linearSetpointCallback(
@@ -278,17 +278,15 @@ void Automation::spinOnce() {
   ros::spinOnce();
   OverrideRCIn msg;
 
-  double yaw = 0;// -yaw_pid_.get_pid(yaw_);
-  msg.channels[1] = angleToPpm(roll_set_);  // + roll_pid_.get_pidd(roll_, roll_dot_);
-  msg.channels[0] = angleToPpm(pitch_set_);  // + pitch_pid_.get_pidd(pitch_, pitch_dot_);
-  msg.channels[3] = 1500 + yaw;
+  msg.channels[1] = angleToPpm(roll_set_);
+  msg.channels[0] = angleToPpm(pitch_set_);
+  msg.channels[3] = speedToPpm(yaw_dot_);
 
   msg.channels[5] = speedToPpm(xdot_);
-  msg.channels[6] = speedToPpm(ydot_);  // + ydot_;
-  msg.channels[2] = speedToPpm(zdot_); // /*+ zdot_*/ - depth_pid_.get_pid(pressure_);
+  msg.channels[6] = speedToPpm(ydot_);
+  msg.channels[2] = speedToPpm(zdot_);
 
   msg.channels[4] = mode_;
   msg.channels[7] = camera_tilt_;
   rc_override_pub_.publish(msg);
-  /* ROS_INFO("Yaw: %f", yaw); */
 }
