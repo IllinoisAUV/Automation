@@ -31,8 +31,8 @@ int main(int argc, char **argv) {
     ros::spinOnce();
     rate.sleep();
   }
-  automation.SetDepth(automation.GetDepth() - 50.0);
-  automation.SetRPY(0.0, 0.0, 1.5);
+  automation.setDepth(automation.getDepth() - 50.0);
+  automation.setRPY(0.0, 0.0, 1.5);
   while (!g_request_shutdown) {
     automation.spinOnce();
     rate.sleep();

@@ -1,9 +1,9 @@
 #ifndef AUTOMATION_H
 #define AUTOMATION_H
 
-#include <ros/ros.h>
-#include <nav_msgs/Odometry.h>
 #include <geometry_msgs/Vector3.h>
+#include <nav_msgs/Odometry.h>
+#include <ros/ros.h>
 #include <sensor_msgs/FluidPressure.h>
 #include <sensor_msgs/Imu.h>
 #include <std_msgs/Bool.h>
@@ -18,19 +18,23 @@ class Automation {
   static void SetIMURate(int hz);
 
   //----------------------------------------------
-  void SetRPY(double roll, double pitch, double yaw);
+  // Set desired roll pitch and yaw in radians
+  void setRPY(double roll, double pitch, double yaw);
+  // Set speed as a percent
+  void setSpeed(double x, double y, double z);
 
   void spin(float hz);
   void spinOnce();
 
-  void SetDepth(double depth);
-  double GetDepth();
+  void setDepth(double depth);
+  double getDepth();
   //---------------------------------------------------
  private:
-  enum {
+  typedef enum {
     MODE_STABILIZE = 1000,
-    MODE_ALT_HOLD = 2000
-  };  // ppm in uS; from ArduSub/radio.cpp
+    MODE_MANUAL = 1500,
+    MODE_DEPTH_HOLD = 2000,
+  } Mode;  // ppm in uS; from ArduSub/radio.cpp
 
   // functions
   void gainsFromFile(std::string file);
@@ -38,11 +42,16 @@ class Automation {
   void imuCallback(const sensor_msgs::Imu::ConstPtr &msg);
   void depthCallback(const sensor_msgs::FluidPressure::ConstPtr &msg);
 
+  void setMode(Mode mode);
+
   void angularSetpointCallback(const geometry_msgs::Vector3::ConstPtr &msg);
   void linearSetpointCallback(const geometry_msgs::Vector3::ConstPtr &msg);
 
   void armingCallback(const std_msgs::Bool::ConstPtr &msg);
-  uint16_t mode_;
+
+  uint16_t angleToPpm(double angle);
+  uint16_t speedToPpm(double speed);
+  Mode mode_;
   uint16_t camera_tilt_;
 
   // node handle
@@ -59,6 +68,8 @@ class Automation {
 
   ros::Subscriber arming_sub_;
 
+  ros::ServiceClient mode_client_;
+
   // Current values
   double pressure_;
   double roll_, pitch_, yaw_;
@@ -67,10 +78,11 @@ class Automation {
   double xdot_, ydot_, zdot_;
 
   PID depth_pid_;
+  double roll_set_;
+  double pitch_set_;
   PID roll_pid_;
   PID pitch_pid_;
   PID yaw_pid_;
 };
 
-
-#endif // AUTOMATION_H
+#endif  // AUTOMATION_H
