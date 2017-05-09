@@ -8,26 +8,23 @@
 #include <sensor_msgs/Imu.h>
 #include <std_msgs/Bool.h>
 #include <string>
-#include "pid.h"
 
 class Automation {
  public:
-  Automation(std::string gains);
+  Automation();
   static void ArmPixhawk();
   static void DisarmPixhawk();
   static void SetIMURate(int hz);
 
   //----------------------------------------------
-  // Set desired roll pitch and yaw in radians
+  // Set a desired roll and pitch, and yaw rate of change
   void setRPY(double roll, double pitch, double yaw);
-  // Set speed as a percent
+  // Set speed as a percent in x, y and z
   void setSpeed(double x, double y, double z);
 
   void spin(float hz);
   void spinOnce();
 
-  void setDepth(double depth);
-  double getDepth();
   //---------------------------------------------------
  private:
   typedef enum {
@@ -37,8 +34,6 @@ class Automation {
   } Mode;  // ppm in uS; from ArduSub/radio.cpp
 
   // functions
-  void gainsFromFile(std::string file);
-  void odomCallback(const nav_msgs::Odometry::ConstPtr &msg);
   void imuCallback(const sensor_msgs::Imu::ConstPtr &msg);
   void depthCallback(const sensor_msgs::FluidPressure::ConstPtr &msg);
 
@@ -61,7 +56,6 @@ class Automation {
   ros::Publisher rc_override_pub_;
   ros::Subscriber odom_sub_;
   ros::Subscriber imu_sub_;
-  ros::Subscriber depth_sub_;
 
   ros::Subscriber linear_setpoint_sub_;
   ros::Subscriber angular_setpoint_sub_;
@@ -77,12 +71,8 @@ class Automation {
 
   double xdot_, ydot_, zdot_;
 
-  PID depth_pid_;
   double roll_set_;
   double pitch_set_;
-  PID roll_pid_;
-  PID pitch_pid_;
-  PID yaw_pid_;
 };
 
 #endif  // AUTOMATION_H

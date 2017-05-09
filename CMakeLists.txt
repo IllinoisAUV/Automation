@@ -107,7 +107,7 @@ find_package(catkin REQUIRED COMPONENTS
 ## DEPENDS: system dependencies of this project that dependent projects also need
 catkin_package(
   INCLUDE_DIRS include
-  LIBRARIES pid
+  LIBRARIES 
   CATKIN_DEPENDS roscpp sensor_msgs std_msgs mavros_msgs nav_msgs geometry_msgs
   DEPENDS system_lib
 )
@@ -121,9 +121,6 @@ catkin_package(
 include_directories(include ${catkin_INCLUDE_DIRS})
 
 ## Declare a C++ library
-add_library(pid
-  src/pid.cpp
-)
 add_library(automation
   src/automation.cpp
 )
@@ -131,17 +128,16 @@ add_library(automation
 ## Add cmake target dependencies of the library
 ## as an example, code may need to be generated before libraries
 ## either from message generation or dynamic reconfigure
-add_dependencies(pid ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
-add_dependencies(automation ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS} pid)
-target_link_libraries(automation ${catkin_LIBRARIES} pid)
+add_dependencies(automation ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+target_link_libraries(automation ${catkin_LIBRARIES})
 
 ## Declare a C++ executable
 ## With catkin_make all packages are built within a single CMake context
 ## The recommended prefix ensures that target names across packages don't collide
 # add_executable(${PROJECT_NAME}_node src/automation_node.cpp)
 add_executable(automation_node src/automation_node.cpp)
-add_dependencies(automation_node ${catkin_EXPORTED_TARGETS} automation pid)
-target_link_libraries(automation_node ${catkin_LIBRARIES} pid automation)
+add_dependencies(automation_node ${catkin_EXPORTED_TARGETS} automation)
+target_link_libraries(automation_node ${catkin_LIBRARIES} automation)
 
 
 ## Rename C++ executable without prefix
