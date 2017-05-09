@@ -15,12 +15,8 @@ void mySigIntHandler(int sig) { g_request_shutdown = 1; }
 int main(int argc, char **argv) {
   ros::init(argc, argv, "automation");
 
-  if (argc != 2) {
-    ROS_ERROR("Please specify a gains file");
-    return 1;
-  }
   ros::NodeHandle nh;
-  Automation automation(argv[1]);
+  Automation automation;
   Automation::ArmPixhawk();
   ros::spinOnce();
 
@@ -31,8 +27,9 @@ int main(int argc, char **argv) {
     ros::spinOnce();
     rate.sleep();
   }
-  automation.setDepth(automation.getDepth() - 50.0);
+  // Set roll and pitch setpoints, and yaw rate of change
   automation.setRPY(0.0, 0.0, 0.0);
+  // Set x, y, z rate changes
   automation.setSpeed(0.0, 0.0, 0.0);
   while (!g_request_shutdown) {
     automation.spinOnce();
