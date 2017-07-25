@@ -28,6 +28,7 @@ using sensor_msgs::Imu;
 using sensor_msgs::FluidPressure;
 using mavros_msgs::SetMode;
 
+bool Automation::armed_;
 Automation::Automation() {
   imu_sub_ =
       nh.subscribe("/mavros/imu/data", 1, &Automation::imuCallback, this);
@@ -83,6 +84,7 @@ void Automation::ArmPixhawk() {
   if (!client.call(srv)) {
     ROS_ERROR("Failed to arm");
   }
+  armed_ = true;
 }
 void Automation::DisarmPixhawk() {
   ROS_INFO("Disarming PixHawk");
@@ -94,6 +96,7 @@ void Automation::DisarmPixhawk() {
   if (!client.call(srv)) {
     ROS_ERROR("Failed to disarm");
   }
+  armed_ = false;
 }
 
 void Automation::SetIMURate(int hz) {
