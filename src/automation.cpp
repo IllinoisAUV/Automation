@@ -38,17 +38,19 @@ Automation::Automation() {
       nh.subscribe("/vehicle/angular/setpoint", 1,
                    &Automation::angularSetpointCallback, this);
   linear_setpoint_sub_ = nh.subscribe(
-      "/vehicle/linearVelocity", 1, &Automation::linearSetpointCallback, this);
+      "/vehicle/linear/setpoint", 1, &Automation::linearSetpointCallback, this);
 
   arming_sub_ =
       nh.subscribe("/vehicle/arming", 1, &Automation::armingCallback, this);
 
+  arming_client_ = nh.serviceClient<mavros_msgs::CommandBool>("/mavros/cmd/arming");
   mode_client_ = nh.serviceClient<mavros_msgs::SetMode>("mavros/set_mode");
+  rate_client_ = nh.serviceClient<StreamRate>("/mavros/set_stream_rate");
 
   mode_ = MODE_DEPTH_HOLD;
   camera_tilt_ = 1500;
 
-  setMode(mode_);
+  /* setMode(mode_); */
 }
 
 void Automation::setMode(Mode mode) {
@@ -132,10 +134,11 @@ void Automation::imuCallback(const sensor_msgs::Imu::ConstPtr &msg) {
 }
 
 void Automation::armingCallback(const std_msgs::Bool::ConstPtr &msg) {
+  ROS_INFO("Received arm command: %s", msg->data ? "true" : "false");
   if (msg->data) {
-    ArmPixhawk();
+    Automation::ArmPixhawk();
   } else {
-    DisarmPixhawk();
+    Automation::DisarmPixhawk();
   }
 }
 
@@ -197,10 +200,7 @@ uint16_t Automation::speedToPpm(double speed) {
 }
 
 void Automation::spinOnce() {
-  // Apply the PID controllers
-  ros::spinOnce();
   OverrideRCIn msg;
-
   msg.channels[1] = angleToPpm(roll_set_);
   msg.channels[0] = angleToPpm(pitch_set_);
   msg.channels[3] = speedToPpm(yaw_dot_);

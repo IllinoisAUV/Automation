@@ -24,7 +24,6 @@ class Automation {
 
   void spin(float hz);
   void spinOnce();
-
   //---------------------------------------------------
  private:
   typedef enum {
@@ -33,9 +32,16 @@ class Automation {
     MODE_DEPTH_HOLD = 2000,
   } Mode;  // ppm in uS; from ArduSub/radio.cpp
 
+  typedef enum {
+      ESTOP,
+      RUN,
+  } State;
+
   // functions
   void imuCallback(const sensor_msgs::Imu::ConstPtr &msg);
   void depthCallback(const sensor_msgs::FluidPressure::ConstPtr &msg);
+
+  void killCallback(const std_msgs::Bool::ConstPtr &kill);
 
   void setMode(Mode mode);
 
@@ -61,8 +67,13 @@ class Automation {
   ros::Subscriber angular_setpoint_sub_;
 
   ros::Subscriber arming_sub_;
+  ros::Subscriber kill_sub_;
 
+  ros::ServiceClient arming_client_;
+  ros::ServiceClient rate_client_;
   ros::ServiceClient mode_client_;
+
+  static bool armed_;
 
   // Current values
   double pressure_;

@@ -17,7 +17,6 @@ int main(int argc, char **argv) {
 
   ros::NodeHandle nh;
   Automation automation;
-  Automation::ArmPixhawk();
   ros::spinOnce();
 
   signal(SIGINT, mySigIntHandler);
@@ -32,10 +31,11 @@ int main(int argc, char **argv) {
   // Set x, y, z rate changes
   automation.setSpeed(0.0, 0.0, 0.0);
   while (!g_request_shutdown) {
+    ros::spinOnce();
     automation.spinOnce();
     rate.sleep();
   }
-  Automation::DisarmPixhawk();
+  automation.DisarmPixhawk();
   ros::shutdown();
 
   return 0;
