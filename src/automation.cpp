@@ -43,14 +43,24 @@ Automation::Automation() {
   arming_sub_ =
       nh.subscribe("/vehicle/arming", 1, &Automation::armingCallback, this);
 
+  kill_sub_ =
+      nh.subscribe("/kill_switch", 1, &Automation::killCallback, this);
+
   arming_client_ = nh.serviceClient<mavros_msgs::CommandBool>("/mavros/cmd/arming");
   mode_client_ = nh.serviceClient<mavros_msgs::SetMode>("mavros/set_mode");
   rate_client_ = nh.serviceClient<StreamRate>("/mavros/set_stream_rate");
 
   mode_ = MODE_DEPTH_HOLD;
+  new_mode_ = true;
   camera_tilt_ = 1500;
+}
 
-  /* setMode(mode_); */
+
+void Automation::killCallback(const std_msgs::Bool::ConstPtr &kill) {
+    if (kill->data) {
+        // Causes a race on debounce?
+        DisarmPixhawk();
+    }
 }
 
 void Automation::setMode(Mode mode) {
@@ -200,6 +210,10 @@ uint16_t Automation::speedToPpm(double speed) {
 }
 
 void Automation::spinOnce() {
+    if(new_mode_) {
+        setMode(mode_);
+        new_mode_ = false;
+    }
   OverrideRCIn msg;
   msg.channels[1] = angleToPpm(roll_set_);
   msg.channels[0] = angleToPpm(pitch_set_);
@@ -209,7 +223,7 @@ void Automation::spinOnce() {
   msg.channels[6] = speedToPpm(ydot_);
   msg.channels[2] = speedToPpm(zdot_);
 
-  msg.channels[4] = mode_;
+  msg.channels[4] = 1500;
   msg.channels[7] = camera_tilt_;
   rc_override_pub_.publish(msg);
 }

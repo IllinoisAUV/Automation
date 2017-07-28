@@ -54,7 +54,6 @@ class Automation {
   uint16_t speedToPpm(double speed);
   Mode mode_;
   uint16_t camera_tilt_;
-
   // node handle
   ros::NodeHandle nh;
 
@@ -84,6 +83,7 @@ class Automation {
 
   double roll_set_;
   double pitch_set_;
+  bool new_mode_;
 };
 
 #endif  // AUTOMATION_H
