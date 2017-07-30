@@ -28,6 +28,7 @@ using sensor_msgs::Imu;
 using sensor_msgs::FluidPressure;
 using mavros_msgs::SetMode;
 
+#define CONSTRAIN(num, min, max) (num < min ? min : (num > max ? max : num))
 bool Automation::armed_;
 Automation::Automation() {
   imu_sub_ =
@@ -80,9 +81,10 @@ void Automation::setMode(Mode mode) {
   }
 
   if (mode_client_.call(mode_cmd) && mode_cmd.response.success) {
-    ROS_INFO("Mode changed");
+      ROS_INFO("Mode changed");
   } else {
-    ROS_ERROR("Failed to change mode");
+      ROS_INFO("Failed to change mode");
+      return;
   }
 }
 
@@ -94,7 +96,8 @@ void Automation::ArmPixhawk() {
   mavros_msgs::CommandBool srv;
   srv.request.value = true;
   if (!client.call(srv)) {
-    ROS_ERROR("Failed to arm");
+    ROS_INFO("Failed to arm");
+    return;
   }
   armed_ = true;
 }
@@ -106,7 +109,8 @@ void Automation::DisarmPixhawk() {
   mavros_msgs::CommandBool srv;
   srv.request.value = false;
   if (!client.call(srv)) {
-    ROS_ERROR("Failed to disarm");
+    ROS_INFO("Failed to disarm");
+    return;
   }
   armed_ = false;
 }
@@ -132,15 +136,17 @@ void Automation::setRPY(double roll, double pitch, double yaw) {
 }
 
 void Automation::imuCallback(const sensor_msgs::Imu::ConstPtr &msg) {
-  tf::Quaternion q(msg->orientation.x, msg->orientation.y, msg->orientation.z,
-                   msg->orientation.w);
-  tf::Matrix3x3 m(q);
-  m.getRPY(roll_, pitch_, yaw_);
+#if 0
+    tf::Quaternion q(msg->orientation.x, msg->orientation.y, msg->orientation.z,
+            msg->orientation.w);
+    tf::Matrix3x3 m(q);
+    m.getRPY(roll_, pitch_, yaw_);
 
-  /* ROS_INFO("Got rpy: %f %f %f", roll_, pitch_, yaw_); */
-  roll_dot_ = msg->angular_velocity.x;
-  pitch_dot_ = msg->angular_velocity.y;
-  yaw_dot_ = msg->angular_velocity.z;
+    /* ROS_INFO("Got rpy: %f %f %f", roll_, pitch_, yaw_); */
+    roll_dot_ = msg->angular_velocity.x;
+    pitch_dot_ = msg->angular_velocity.y;
+    yaw_dot_ = msg->angular_velocity.z;
+#endif
 }
 
 void Automation::armingCallback(const std_msgs::Bool::ConstPtr &msg) {
@@ -155,17 +161,17 @@ void Automation::armingCallback(const std_msgs::Bool::ConstPtr &msg) {
 void Automation::angularSetpointCallback(
     const geometry_msgs::Vector3::ConstPtr &msg) {
   ROS_INFO("Received angular setpoint: %f %f %f", msg->x, msg->y, msg->z);
-  roll_set_ = msg->x;
-  pitch_set_ = msg->y;
-  yaw_dot_ = msg->z;
+  roll_set_ = CONSTRAIN(msg->x, -M_PI, M_PI);
+  pitch_set_ = CONSTRAIN(msg->y, -M_PI, M_PI);
+  yaw_dot_ = CONSTRAIN(msg->z, -1.0, 1.0);
 }
 
 void Automation::linearSetpointCallback(
     const geometry_msgs::Vector3::ConstPtr &msg) {
   ROS_INFO("Received linear setpoint: %f %f %f", msg->x, msg->y, msg->z);
-  xdot_ = msg->x;
-  ydot_ = msg->y;
-  zdot_ = msg->z;
+  xdot_ = CONSTRAIN(msg->x, -1.0, 1.0);
+  ydot_ = CONSTRAIN(msg->y, -1.0, 1.0);
+  zdot_ = CONSTRAIN(msg->z, -1.0, 1.0);
 }
 
 void Automation::spin(float hz) {
